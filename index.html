@@ -105,7 +105,7 @@ const ring=$('ring'), tapZone=$('tapZone');
 
 // ── 시작 ──
 async function start(){
-  $('startBtn').disabled=true; $('resultCard').style.display='none';
+  $('startBtn').disabled=true; $('resultCard').style.display='none'; $('gameArea').style.display='flex';
   setStatus('카메라 켜는 중…','wait');
   try{
     stream=await navigator.mediaDevices.getUserMedia({
@@ -211,6 +211,7 @@ function finish(){
   const dur=times[times.length-1]||0;
   // 1) 리샘플 → 2) 대역통과 0.7~3.5Hz → 3) 업샘플(피크 해상도) → 4) 피크 → 5) RR 보정
   let sig=resample(times,samples,FS,Math.floor(dur*FS));
+  sig=medfilt(sig,3);            // 튀는 점 스무딩(희한한 파형 완화)
   sig=bandpass(sig,FS,0.7,3.5);
   const up=4, FSU=FS*up;
   sig=upsample(sig,up);
@@ -221,7 +222,8 @@ function finish(){
   const cor=correctRR(rr); const rrc=cor.rr;
 
   let hr=null; if(rrc.length) hr=Math.round(60000/median(rrc));
-  const ok = rrc.length>=5 && hr>=45 && hr<=170 && cor.removedRatio<0.55;
+  // 완화: 박동 4개 이상 + 심박 40~180이면 통과 (아티팩트율로는 막지 않음 — 보간이 이미 처리)
+  const ok = rrc.length>=4 && hr>=40 && hr<=180;
   if(!ok){ showResult(null,null,false); return; }
   const diffs=[]; for(let i=1;i<rrc.length;i++) diffs.push(rrc[i]-rrc[i-1]);
   let rmssd=Math.round(Math.sqrt(mean(diffs.map(d=>d*d))));
@@ -254,6 +256,7 @@ function correctRR(rr){ const n0=rr.length; if(n0<3) return {rr:rr.filter(x=>x>=
   const out=rr.slice(); for(let i=0;i<n0;i++) if(art[i]) out[i]=interp(i,gi,gv); return {rr:out,removedRatio}; }
 function interp(i,xs,ys){ if(i<=xs[0])return ys[0]; if(i>=xs[xs.length-1])return ys[ys.length-1]; let k=1; while(xs[k]<i)k++; const f=(i-xs[k-1])/(xs[k]-xs[k-1]); return ys[k-1]+(ys[k]-ys[k-1])*f; }
 function median(a){ const b=a.slice().sort((x,y)=>x-y); return b[Math.floor(b.length/2)]; }
+function medfilt(x,k){ const o=[]; for(let i=0;i<x.length;i++){ const w=[]; for(let j=i-k;j<=i+k;j++) if(j>=0&&j<x.length) w.push(x[j]); o.push(median(w)); } return o; }
 
 function showResult(hr,rmssd,ok,nbeats){
   $('resultCard').style.display='block'; $('prog').style.width='100%';
@@ -269,7 +272,7 @@ function showResult(hr,rmssd,ok,nbeats){
     $('verdict').className='verdict '+cls; $('verdict').textContent=label;
     $('quality').textContent=`박동 ${nbeats}개 · 게임 점수 ${score}점 · ${note}\n(참고용 등급 — 실제 판정은 서버에서 개인 기준선으로)`;
   }
-  $('gameArea').style.display='flex'; $('breathText').textContent='';
+  $('gameArea').style.display='none';
   $('startBtn').disabled=false; $('startBtn').textContent='다시 측정';
 }
 function grade(rmssd){ if(rmssd>=45) return {label:'저부하 · 안정',cls:'v-low',note:'변이 높음(안정)'}; if(rmssd>=25) return {label:'중간 · 주의',cls:'v-mid',note:'보통'}; return {label:'과부하 · 긴장',cls:'v-high',note:'변이 낮음'}; }
