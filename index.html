@@ -5,50 +5,74 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>필리몽 · 손가락 PPG 측정</title>
 <style>
-  :root{ --bg:#0f1420; --card:#1a2233; --ink:#eef2f7; --mut:#9aa7bd; --blue:#4a90e2; --green:#2ecc71; --red:#e74c3c; --amber:#f1c40f; }
-  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  :root{ --bg:#0f1420; --card:#1a2233; --ink:#eef2f7; --mut:#9aa7bd; --blue:#4a90e2; --green:#2ecc71; --red:#e74c3c; --amber:#f1c40f; --pink:#e88fb0; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
   html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
-    font-family:'Malgun Gothic','맑은 고딕',system-ui,sans-serif;
+    font-family:'Malgun Gothic','맑은 고딕',system-ui,sans-serif; overflow:hidden;
     padding-top:env(safe-area-inset-top,0); padding-bottom:env(safe-area-inset-bottom,0); }
-  .wrap{ max-width:460px; margin:0 auto; padding:18px 16px 28px; }
-  h1{ font-size:20px; margin:6px 0 2px; }
-  .sub{ color:var(--mut); font-size:13px; margin-bottom:16px; }
-  .card{ background:var(--card); border-radius:16px; padding:18px; margin-bottom:14px; }
+  .wrap{ max-width:460px; margin:0 auto; padding:14px 16px 24px; height:100%; display:flex; flex-direction:column; }
+  h1{ font-size:19px; margin:4px 0 2px; }
+  .sub{ color:var(--mut); font-size:13px; margin-bottom:10px; }
+  .card{ background:var(--card); border-radius:16px; padding:14px; margin-bottom:12px; }
   video{ display:none; }
-  canvas#wave{ width:100%; height:130px; background:#0b1018; border-radius:12px; display:block; }
-  .big{ font-size:44px; font-weight:800; line-height:1; }
-  .unit{ font-size:15px; color:var(--mut); font-weight:600; }
-  .grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-  .metric{ background:#0b1018; border-radius:12px; padding:14px; text-align:center; }
-  .metric .lab{ color:var(--mut); font-size:12px; margin-bottom:6px; }
-  .metric .val{ font-size:26px; font-weight:700; }
-  button{ width:100%; border:0; border-radius:14px; padding:16px; font-size:17px; font-weight:700;
-    background:var(--blue); color:#fff; margin-top:6px; }
-  button:disabled{ opacity:.5; }
-  .bar{ height:10px; background:#0b1018; border-radius:6px; overflow:hidden; margin:10px 0 4px; }
-  .bar > i{ display:block; height:100%; width:0; background:var(--green); transition:width .2s; }
-  .status{ text-align:center; font-size:15px; min-height:22px; margin:8px 0; }
-  .fill-hint{ text-align:center; font-size:13px; color:var(--mut); }
-  .dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; background:var(--mut); }
+  canvas#wave{ width:100%; height:72px; background:#0b1018; border-radius:10px; display:block; }
+  .bar{ height:9px; background:#0b1018; border-radius:6px; overflow:hidden; margin:10px 0 2px; }
+  .bar > i{ display:block; height:100%; width:0; background:var(--green); transition:width .25s linear; }
+  .status{ text-align:center; font-size:14px; min-height:20px; }
+  .dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; background:var(--mut); vertical-align:middle;}
   .dot.ok{ background:var(--green);} .dot.bad{ background:var(--red);} .dot.wait{ background:var(--amber);}
+
+  /* 리듬 게임 영역 */
+  .game{ flex:1; position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .breathText{ color:var(--mut); font-size:15px; margin-bottom:14px; height:20px; }
+  .breathWrap{ position:relative; width:230px; height:230px; display:flex; align-items:center; justify-content:center; }
+  .ring{ position:absolute; width:70px; height:70px; border-radius:50%;
+    background:radial-gradient(circle at 40% 35%, #6fb1ff, #2f6fc0);
+    box-shadow:0 0 40px rgba(74,144,226,.6); transition:transform .1s linear; }
+  .ring.tapzone{ cursor:pointer; }
+  .score{ margin-top:16px; font-size:15px; color:var(--mut); min-height:22px; }
+  .score b{ color:var(--ink); font-size:20px; }
+  .flash{ position:absolute; font-size:26px; font-weight:800; opacity:0; transition:opacity .1s; }
+  .flash.show{ opacity:1; }
+
+  button{ width:100%; border:0; border-radius:14px; padding:16px; font-size:17px; font-weight:700;
+    background:var(--blue); color:#fff; margin-top:4px; }
+  button:disabled{ opacity:.5; }
+
+  /* 결과 */
   .result{ display:none; }
-  .verdict{ text-align:center; font-size:22px; font-weight:800; padding:14px; border-radius:12px; margin-top:6px; }
+  .grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:8px; }
+  .metric{ background:#0b1018; border-radius:12px; padding:12px; text-align:center; }
+  .metric .lab{ color:var(--mut); font-size:12px; margin-bottom:4px; }
+  .metric .val{ font-size:24px; font-weight:700; }
+  .unit{ font-size:14px; color:var(--mut); font-weight:600; }
+  .verdict{ text-align:center; font-size:20px; font-weight:800; padding:12px; border-radius:12px; }
   .v-low{ background:rgba(46,204,113,.15); color:var(--green);} .v-mid{ background:rgba(241,196,15,.15); color:var(--amber);} .v-high{ background:rgba(231,76,60,.15); color:var(--red);}
-  .small{ color:var(--mut); font-size:12px; text-align:center; margin-top:10px; line-height:1.5; }
+  .small{ color:var(--mut); font-size:12px; text-align:center; margin-top:8px; line-height:1.5; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>손가락 PPG 측정</h1>
-  <div class="sub">후면 카메라에 손가락 끝을 살짝 덮어주세요 · 30초</div>
+  <div class="sub">한 손가락으로 후면 카메라를 살짝 덮고, 반대 손으로 리듬에 맞춰 톡!</div>
 
   <div class="card">
     <div class="status"><span id="dot" class="dot"></span><span id="statusText">시작을 누르면 카메라가 켜집니다</span></div>
-    <canvas id="wave" width="440" height="130"></canvas>
+    <canvas id="wave" width="440" height="72"></canvas>
     <div class="bar"><i id="prog"></i></div>
-    <div class="fill-hint" id="hint">손가락을 대면 파형이 그려집니다</div>
   </div>
 
+  <!-- 게임 영역 -->
+  <div class="game" id="gameArea">
+    <div class="breathText" id="breathText">준비되면 측정을 시작하세요</div>
+    <div class="breathWrap" id="tapZone">
+      <div class="ring" id="ring"></div>
+      <div class="flash" id="flash">GOOD!</div>
+    </div>
+    <div class="score" id="score"></div>
+  </div>
+
+  <!-- 결과 -->
   <div class="card result" id="resultCard">
     <div class="grid">
       <div class="metric"><div class="lab">심박수</div><div class="val"><span id="hr">–</span> <span class="unit">bpm</span></div></div>
@@ -59,174 +83,174 @@
   </div>
 
   <button id="startBtn">측정 시작</button>
-  <div class="small">플래시가 자동으로 켜집니다. 측정 중 손가락을 움직이지 마세요.<br>이 화면은 테스트용이며, 아직 데이터는 저장되지 않습니다.</div>
+  <div class="small">측정 20초 · 플래시가 켜집니다. 측정하는 손가락은 움직이지 마세요.<br>테스트용이며 아직 데이터는 저장되지 않습니다.</div>
 </div>
 
 <video id="cam" playsinline muted></video>
 
 <script>
-// ── 설정 ──────────────────────────────────────────────
-const DURATION = 30;          // 측정 초
-const FPS_TARGET = 30;
-const BAND = [0.7, 3.5];      // Hz (심박 42~210bpm)
-let stream, track, rafId, samples = [], times = [], running = false, t0 = 0;
+// ── 설정 ──
+const WARMUP = 3;        // 안정화(초)
+const DURATION = 20;     // 측정(초)
+const FS = 30;
+const BREATH = 4.0;      // 들숨/날숨 각 4초 (호흡 유도 리듬)
+let stream, track, rafId, running=false, phase='idle', t0=0, warmT0=0;
+let samples=[], times=[];
+let score=0, lastTapBeat=-1;
 
-const $ = id => document.getElementById(id);
-const cam = $('cam'), waveC = $('wave'), wctx = waveC.getContext('2d');
+const $=id=>document.getElementById(id);
+const cam=$('cam'), waveC=$('wave'), wctx=waveC.getContext('2d');
+const ring=$('ring'), tapZone=$('tapZone');
 
-// ── 카메라 시작 (후면 + 플래시) ────────────────────────
+// ── 시작 ──
 async function start(){
-  $('startBtn').disabled = true;
-  setStatus('카메라 켜는 중…', 'wait');
+  $('startBtn').disabled=true; $('resultCard').style.display='none';
+  setStatus('카메라 켜는 중…','wait');
   try{
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal:'environment' }, width:{ideal:640}, height:{ideal:480}, frameRate:{ideal:FPS_TARGET} },
-      audio:false
-    });
-    cam.srcObject = stream; await cam.play();
-    track = stream.getVideoTracks()[0];
-    // 플래시(torch) 켜기 — 삼성/안드로이드 크롬 지원
-    try{
-      const cap = track.getCapabilities ? track.getCapabilities() : {};
-      if(cap.torch){ await track.applyConstraints({ advanced:[{ torch:true }] }); }
-      else { setHint('플래시 미지원 기기 — 밝은 곳에서 측정하세요'); }
-    }catch(e){ setHint('플래시를 켤 수 없어요 — 밝은 곳에서 측정하세요'); }
-    beginMeasure();
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ideal:'environment'}, width:{ideal:640}, height:{ideal:480}, frameRate:{ideal:FS} }, audio:false });
+    cam.srcObject=stream; await cam.play();
+    track=stream.getVideoTracks()[0];
+    try{ const cap=track.getCapabilities?track.getCapabilities():{}; if(cap.torch) await track.applyConstraints({advanced:[{torch:true}]}); }catch(e){}
+    // 안정화 단계 시작
+    samples=[]; times=[]; score=0; lastTapBeat=-1; running=true; phase='warmup'; warmT0=performance.now();
+    $('breathText').textContent='손가락을 대고 잠시만요…';
+    loop();
   }catch(err){
-    setStatus('카메라 권한이 필요해요', 'bad');
-    setHint('브라우저 설정에서 카메라를 허용해주세요');
-    $('startBtn').disabled = false;
+    setStatus('카메라 권한이 필요해요','bad'); $('breathText').textContent='브라우저에서 카메라를 허용해주세요'; $('startBtn').disabled=false;
   }
 }
 
-// ── 측정 루프 ─────────────────────────────────────────
-const grab = document.createElement('canvas'); grab.width = 64; grab.height = 48;
-const gctx = grab.getContext('2d', { willReadFrequently:true });
-
-function beginMeasure(){
-  samples = []; times = []; running = true; t0 = performance.now();
-  $('resultCard').style.display = 'none';
-  setStatus('측정 중… 손가락을 가만히', 'ok');
-  loop();
+// ── 프레임 캡처 ──
+const grab=document.createElement('canvas'); grab.width=64; grab.height=48;
+const gctx=grab.getContext('2d',{willReadFrequently:true});
+function sample(){
+  gctx.drawImage(cam,0,0,grab.width,grab.height);
+  const d=gctx.getImageData(16,12,32,24).data;
+  let r=0,g=0,n=0; for(let i=0;i<d.length;i+=4){ r+=d[i]; g+=d[i+1]; n++; } r/=n; g/=n;
+  return {r,g,contact:(r>70 && r>g*1.05)};   // 접촉 기준 완화
 }
 
+// ── 메인 루프 ──
 function loop(){
   if(!running) return;
-  const now = (performance.now() - t0) / 1000;
-  // 중앙 영역 평균 red 값 (손가락 접촉 시 혈류 신호)
-  gctx.drawImage(cam, 0, 0, grab.width, grab.height);
-  const d = gctx.getImageData(16, 12, 32, 24).data;  // 중앙 crop
-  let r = 0, g = 0, n = 0;
-  for(let i=0;i<d.length;i+=4){ r += d[i]; g += d[i+1]; n++; }
-  r/=n; g/=n;
-  const val = r;                       // red 채널 평균
-  samples.push(val); times.push(now);
-
-  // 손가락 접촉 판정: red가 충분히 높고(플래시 반사) 화면이 어둡지 않음
-  const contact = r > 80 && r > g*1.1;
-  drawWave(contact);
-  $('prog').style.width = Math.min(100, now/DURATION*100) + '%';
-  $('hint').textContent = contact ? '좋아요 — 그대로 유지하세요' : '손가락으로 카메라를 완전히 덮어주세요';
-  $('dot').className = 'dot ' + (contact ? 'ok' : 'wait');
-
-  if(now >= DURATION){ finish(); return; }
-  rafId = requestAnimationFrame(loop);
+  const s=sample();
+  if(phase==='warmup'){
+    const w=(performance.now()-warmT0)/1000;
+    $('dot').className='dot '+(s.contact?'ok':'wait');
+    if(s.contact){
+      setStatus('좋아요 — 그대로 유지','ok');
+      if(w>=WARMUP){ phase='measure'; t0=performance.now(); $('breathText').textContent='원이 작아질 때 톡!'; }
+    }else{
+      setStatus('손가락으로 카메라를 덮어주세요','wait'); warmT0=performance.now(); // 접촉 끊기면 안정화 리셋
+    }
+    drawWave(s.contact); breathe(0);
+    rafId=requestAnimationFrame(loop); return;
+  }
+  // measure
+  const now=(performance.now()-t0)/1000;
+  samples.push(s.r); times.push(now);
+  $('dot').className='dot '+(s.contact?'ok':'wait');
+  setStatus(s.contact?'측정 중… 손가락 그대로':'신호 약함 — 살짝 더 눌러요', s.contact?'ok':'wait');
+  $('prog').style.width=Math.min(100,now/DURATION*100)+'%';
+  drawWave(s.contact); breathe(now);
+  if(now>=DURATION){ finish(); return; }
+  rafId=requestAnimationFrame(loop);
 }
 
-// ── 파형 그리기 (최근 6초) ─────────────────────────────
-function drawWave(contact){
-  const W = waveC.width, H = waveC.height;
-  wctx.clearRect(0,0,W,H);
-  const win = 6;                                   // 최근 6초
-  const lastT = times[times.length-1];
-  let s = times.length-1; while(s>0 && lastT - times[s] < win) s--;
-  const seg = samples.slice(s), tseg = times.slice(s);
-  if(seg.length < 3) return;
-  // 대역통과 근사: 이동평균 제거(detrend)
-  const ma = movavg(seg, Math.round(seg.length/6)||3);
-  const de = seg.map((v,i)=> v - ma[i]);
-  let mn = Math.min(...de), mx = Math.max(...de), rng = (mx-mn)||1;
-  wctx.strokeStyle = contact ? '#4a90e2' : '#33405a';
-  wctx.lineWidth = 2.5; wctx.beginPath();
-  for(let i=0;i<de.length;i++){
-    const x = i/(de.length-1)*W;
-    const y = H - ((de[i]-mn)/rng)*(H*0.8) - H*0.1;
-    i? wctx.lineTo(x,y) : wctx.moveTo(x,y);
+// ── 숨쉬는 원(호흡 리듬) ──
+function breathe(now){
+  const p=(now % (BREATH*2))/(BREATH*2);        // 0~1
+  const scale = p<0.5 ? (p/0.5) : (1-(p-0.5)/0.5); // 0→1→0 (커졌다 작아짐)
+  const px = 70 + scale*150;                     // 70~220px
+  ring.style.transform=`scale(${px/70})`;
+  const txt = p<0.5 ? '들이쉬며 준비…' : '작아질 때 톡!';
+  if(phase==='measure') $('breathText').textContent=txt;
+  ring._smallNow = (p>0.92 || p<0.08);           // 가장 작을 때 근처
+  ring._beat = Math.floor(now/(BREATH*2));       // 몇 번째 호흡
+}
+
+// ── 탭(리듬 게임) ──
+tapZone.addEventListener('pointerdown', e=>{
+  if(phase!=='measure') return;
+  e.preventDefault();
+  const good = ring._smallNow;
+  if(good && ring._beat!==lastTapBeat){
+    score+=10; lastTapBeat=ring._beat; flash('GOOD! +10','var(--green)');
+  }else if(good){
+    flash('이미 눌렀어요','var(--mut)');
+  }else{
+    flash('작아질 때!','var(--amber)');
   }
+  $('score').innerHTML = `점수 <b>${score}</b>`;
+},{passive:false});
+
+function flash(msg,color){ const f=$('flash'); f.textContent=msg; f.style.color=color; f.classList.add('show'); clearTimeout(f._t); f._t=setTimeout(()=>f.classList.remove('show'),450); }
+
+// ── 파형 ──
+function drawWave(contact){
+  const W=waveC.width,H=waveC.height; wctx.clearRect(0,0,W,H);
+  const win=5, lastT=times.length?times[times.length-1]:0;
+  let s=times.length-1; while(s>0 && lastT-times[s]<win) s--;
+  const seg=samples.slice(s); if(seg.length<3){ return; }
+  const ma=movavg(seg,Math.round(seg.length/6)||3); const de=seg.map((v,i)=>v-ma[i]);
+  let mn=Math.min(...de),mx=Math.max(...de),rng=(mx-mn)||1;
+  wctx.strokeStyle=contact?'#4a90e2':'#33405a'; wctx.lineWidth=2.2; wctx.beginPath();
+  for(let i=0;i<de.length;i++){ const x=i/(de.length-1)*W; const y=H-((de[i]-mn)/rng)*(H*0.8)-H*0.1; i?wctx.lineTo(x,y):wctx.moveTo(x,y); }
   wctx.stroke();
 }
 
-// ── 측정 종료 → HR·RMSSD·품질 계산 ─────────────────────
+// ── 종료·분석 ──
 function finish(){
-  running = false; cancelAnimationFrame(rafId);
-  try{ track.applyConstraints({ advanced:[{ torch:false }] }); }catch(e){}
+  running=false; cancelAnimationFrame(rafId);
+  try{ track.applyConstraints({advanced:[{torch:false}]}); }catch(e){}
   if(stream) stream.getTracks().forEach(t=>t.stop());
-  setStatus('분석 중…', 'wait');
+  setStatus('분석 중…','wait'); $('gameArea').style.display='none';
 
-  // 균일 샘플링으로 리샘플
-  const fs = 30;
-  const dur = times[times.length-1];
-  const N = Math.floor(dur*fs);
-  const rs = resample(times, samples, fs, N);
-  // detrend + 대역통과(간이 IIR 없이 이동평균 차감)
-  const base = movavg(rs, Math.round(fs*0.75));
-  let sig = rs.map((v,i)=> v - base[i]);
-  // 정규화
-  const m = mean(sig), sd = std(sig)||1; sig = sig.map(v=>(v-m)/sd);
+  const dur=times[times.length-1]||0;
+  const rs=resample(times,samples,FS,Math.floor(dur*FS));
+  const base=movavg(rs,Math.round(FS*0.8)); let sig=rs.map((v,i)=>v-base[i]);
+  const m=mean(sig), sd=std(sig)||1; sig=sig.map(v=>(v-m)/sd);
+  const peaks=findPeaks(sig,Math.round(FS*0.4));
+  const rr=[]; for(let i=1;i<peaks.length;i++) rr.push((peaks[i]-peaks[i-1])/FS*1000);
+  const rrc=cleanRR(rr);
 
-  // 신호품질: 표준편차·주기성 대략 확인
-  const good = std(rs) > 1.2 && sig.length > fs*15;
-  // 피크 검출 (최소 간격 0.4s)
-  const peaks = findPeaks(sig, Math.round(fs*0.4));
-  const rr = []; for(let i=1;i<peaks.length;i++) rr.push((peaks[i]-peaks[i-1])/fs*1000);
-  const rrc = cleanRR(rr);
-
-  if(!good || rrc.length < 8){
-    showResult(null, null, false);
-    return;
-  }
-  const meanRR = mean(rrc);
-  const hr = Math.round(60000/meanRR);
-  const diffs = []; for(let i=1;i<rrc.length;i++) diffs.push(rrc[i]-rrc[i-1]);
-  const rmssd = Math.round(Math.sqrt(mean(diffs.map(d=>d*d))));
-  showResult(hr, rmssd, true, rrc.length);
+  // 완화된 품질 기준: 박동 6개 이상 + 심박 정상범위면 통과
+  let hr=null; if(rrc.length) hr=Math.round(60000/mean(rrc));
+  const ok = rrc.length>=6 && hr>=45 && hr<=160;
+  if(!ok){ showResult(null,null,false); return; }
+  const diffs=[]; for(let i=1;i<rrc.length;i++) diffs.push(rrc[i]-rrc[i-1]);
+  const rmssd=Math.round(Math.sqrt(mean(diffs.map(d=>d*d))));
+  showResult(hr,rmssd,true,rrc.length);
 }
 
-function showResult(hr, rmssd, ok, nbeats){
-  $('resultCard').style.display = 'block';
-  $('prog').style.width = '100%';
+function showResult(hr,rmssd,ok,nbeats){
+  $('resultCard').style.display='block'; $('prog').style.width='100%';
   if(!ok){
-    setStatus('신호 품질 부족 — 다시 측정해주세요', 'bad');
-    $('hr').textContent = '–'; $('rmssd').textContent = '–';
-    $('verdict').className = 'verdict'; $('verdict').textContent = '재측정 필요';
-    $('quality').textContent = '손가락으로 카메라를 완전히 덮고, 움직이지 않게 유지해주세요.';
+    setStatus('신호가 약해요 — 다시 해볼까요?','bad');
+    $('hr').textContent='–'; $('rmssd').textContent='–';
+    $('verdict').className='verdict'; $('verdict').textContent='다시 측정';
+    $('quality').textContent='손가락으로 렌즈를 완전히 덮고, 너무 세게 누르지 말고 가볍게 얹어주세요.';
   }else{
-    setStatus('측정 완료', 'ok');
-    $('hr').textContent = hr; $('rmssd').textContent = rmssd;
-    // 간이 등급(표시용) — 실제 판정은 서버 모델이 개인 baseline으로 계산
-    const {label, cls, note} = gradeByRMSSD(rmssd);
-    $('verdict').className = 'verdict ' + cls; $('verdict').textContent = label;
-    $('quality').textContent = `박동 ${nbeats}개 검출 · ${note}\n(참고용 등급 — 실제 판정은 서버에서 개인 기준선으로 계산)`;
+    setStatus('측정 완료 🎉','ok');
+    $('hr').textContent=hr; $('rmssd').textContent=rmssd;
+    const {label,cls,note}=grade(rmssd);
+    $('verdict').className='verdict '+cls; $('verdict').textContent=label;
+    $('quality').textContent=`박동 ${nbeats}개 · 게임 점수 ${score}점 · ${note}\n(참고용 등급 — 실제 판정은 서버에서 개인 기준선으로)`;
   }
-  $('startBtn').disabled = false; $('startBtn').textContent = '다시 측정';
+  $('gameArea').style.display='flex'; $('breathText').textContent='';
+  $('startBtn').disabled=false; $('startBtn').textContent='다시 측정';
 }
+function grade(rmssd){ if(rmssd>=45) return {label:'저부하 · 안정',cls:'v-low',note:'변이 높음(안정)'}; if(rmssd>=25) return {label:'중간 · 주의',cls:'v-mid',note:'보통'}; return {label:'과부하 · 긴장',cls:'v-high',note:'변이 낮음'}; }
 
-// 화면 표시용 임시 등급 (절대 RMSSD 기준 — 서버 모델과 다름, 참고용)
-function gradeByRMSSD(rmssd){
-  if(rmssd >= 45) return { label:'저부하 · 안정', cls:'v-low',  note:'심박변이가 높음(안정적)' };
-  if(rmssd >= 25) return { label:'중간 · 주의',  cls:'v-mid',  note:'보통 범위' };
-  return                { label:'과부하 · 긴장',  cls:'v-high', note:'심박변이가 낮음' };
-}
-
-// ── 유틸 ──────────────────────────────────────────────
-function setStatus(t, c){ $('statusText').textContent = t; $('dot').className = 'dot '+(c||''); }
-function setHint(t){ $('hint').textContent = t; }
+// ── 유틸 ──
+function setStatus(t,c){ $('statusText').textContent=t; $('dot').className='dot '+(c||''); }
 function mean(a){ return a.reduce((x,y)=>x+y,0)/a.length; }
 function std(a){ const m=mean(a); return Math.sqrt(mean(a.map(v=>(v-m)**2))); }
 function movavg(a,k){ k=Math.max(1,k); const o=[]; for(let i=0;i<a.length;i++){ let s=0,c=0; for(let j=i-k;j<=i+k;j++){ if(j>=0&&j<a.length){s+=a[j];c++;} } o.push(s/c);} return o; }
-function resample(t,v,fs,N){ const o=[]; for(let i=0;i<N;i++){ const tt=i/fs; let j=1; while(j<t.length && t[j]<tt) j++; const t0=t[j-1],t1=t[j]||t0+1e-3,v0=v[j-1],v1=v[j]||v0; const f=(tt-t0)/((t1-t0)||1e-3); o.push(v0+(v1-v0)*f);} return o; }
-function findPeaks(s, minDist){ const p=[]; for(let i=1;i<s.length-1;i++){ if(s[i]>s[i-1]&&s[i]>=s[i+1]&&s[i]>0.3){ if(p.length===0||i-p[p.length-1]>=minDist) p.push(i); else if(s[i]>s[p[p.length-1]]) p[p.length-1]=i; } } return p; }
-function cleanRR(rr){ const f=rr.filter(x=>x>=300&&x<=1500); if(f.length<3) return f; const med=f.slice().sort((a,b)=>a-b)[Math.floor(f.length/2)]; return f.filter(x=>Math.abs(x-med)<=0.35*med); }
+function resample(t,v,fs,N){ const o=[]; for(let i=0;i<N;i++){ const tt=i/fs; let j=1; while(j<t.length&&t[j]<tt) j++; const t0=t[j-1],t1=t[j]||t0+1e-3,v0=v[j-1],v1=v[j]||v0; const f=(tt-t0)/((t1-t0)||1e-3); o.push(v0+(v1-v0)*f);} return o; }
+function findPeaks(s,minDist){ const p=[]; for(let i=1;i<s.length-1;i++){ if(s[i]>s[i-1]&&s[i]>=s[i+1]&&s[i]>0.2){ if(p.length===0||i-p[p.length-1]>=minDist) p.push(i); else if(s[i]>s[p[p.length-1]]) p[p.length-1]=i; } } return p; }
+function cleanRR(rr){ const f=rr.filter(x=>x>=300&&x<=1500); if(f.length<3) return f; const med=f.slice().sort((a,b)=>a-b)[Math.floor(f.length/2)]; return f.filter(x=>Math.abs(x-med)<=0.4*med); }
 
 $('startBtn').addEventListener('click', start);
 </script>
