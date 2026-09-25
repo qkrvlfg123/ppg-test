@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>필리몽 · 손가락 PPG 측정</title>
+<style>
+  :root{ --bg:#0f1420; --card:#1a2233; --ink:#eef2f7; --mut:#9aa7bd; --blue:#4a90e2; --green:#2ecc71; --red:#e74c3c; --amber:#f1c40f; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:'Malgun Gothic','맑은 고딕',system-ui,sans-serif;
+    padding-top:env(safe-area-inset-top,0); padding-bottom:env(safe-area-inset-bottom,0); }
+  .wrap{ max-width:460px; margin:0 auto; padding:18px 16px 28px; }
+  h1{ font-size:20px; margin:6px 0 2px; }
+  .sub{ color:var(--mut); font-size:13px; margin-bottom:16px; }
+  .card{ background:var(--card); border-radius:16px; padding:18px; margin-bottom:14px; }
+  video{ display:none; }
+  canvas#wave{ width:100%; height:130px; background:#0b1018; border-radius:12px; display:block; }
+  .big{ font-size:44px; font-weight:800; line-height:1; }
+  .unit{ font-size:15px; color:var(--mut); font-weight:600; }
+  .grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .metric{ background:#0b1018; border-radius:12px; padding:14px; text-align:center; }
+  .metric .lab{ color:var(--mut); font-size:12px; margin-bottom:6px; }
+  .metric .val{ font-size:26px; font-weight:700; }
+  button{ width:100%; border:0; border-radius:14px; padding:16px; font-size:17px; font-weight:700;
+    background:var(--blue); color:#fff; margin-top:6px; }
+  button:disabled{ opacity:.5; }
+  .bar{ height:10px; background:#0b1018; border-radius:6px; overflow:hidden; margin:10px 0 4px; }
+  .bar > i{ display:block; height:100%; width:0; background:var(--green); transition:width .2s; }
+  .status{ text-align:center; font-size:15px; min-height:22px; margin:8px 0; }
+  .fill-hint{ text-align:center; font-size:13px; color:var(--mut); }
+  .dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; background:var(--mut); }
+  .dot.ok{ background:var(--green);} .dot.bad{ background:var(--red);} .dot.wait{ background:var(--amber);}
+  .result{ display:none; }
+  .verdict{ text-align:center; font-size:22px; font-weight:800; padding:14px; border-radius:12px; margin-top:6px; }
+  .v-low{ background:rgba(46,204,113,.15); color:var(--green);} .v-mid{ background:rgba(241,196,15,.15); color:var(--amber);} .v-high{ background:rgba(231,76,60,.15); color:var(--red);}
+  .small{ color:var(--mut); font-size:12px; text-align:center; margin-top:10px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>손가락 PPG 측정</h1>
+  <div class="sub">후면 카메라에 손가락 끝을 살짝 덮어주세요 · 30초</div>
+
+  <div class="card">
+    <div class="status"><span id="dot" class="dot"></span><span id="statusText">시작을 누르면 카메라가 켜집니다</span></div>
+    <canvas id="wave" width="440" height="130"></canvas>
+    <div class="bar"><i id="prog"></i></div>
+    <div class="fill-hint" id="hint">손가락을 대면 파형이 그려집니다</div>
+  </div>
+
+  <div class="card result" id="resultCard">
+    <div class="grid">
+      <div class="metric"><div class="lab">심박수</div><div class="val"><span id="hr">–</span> <span class="unit">bpm</span></div></div>
+      <div class="metric"><div class="lab">RMSSD</div><div class="val"><span id="rmssd">–</span> <span class="unit">ms</span></div></div>
+    </div>
+    <div class="verdict" id="verdict">–</div>
+    <div class="small" id="quality"></div>
+  </div>
+
+  <button id="startBtn">측정 시작</button>
+  <div class="small">플래시가 자동으로 켜집니다. 측정 중 손가락을 움직이지 마세요.<br>이 화면은 테스트용이며, 아직 데이터는 저장되지 않습니다.</div>
+</div>
+
+<video id="cam" playsinline muted></video>
+
+<script>
+// ── 설정 ──────────────────────────────────────────────
+const DURATION = 30;          // 측정 초
+const FPS_TARGET = 30;
+const BAND = [0.7, 3.5];      // Hz (심박 42~210bpm)
+let stream, track, rafId, samples = [], times = [], running = false, t0 = 0;
+
+const $ = id => document.getElementById(id);
+const cam = $('cam'), waveC = $('wave'), wctx = waveC.getContext('2d');
+
+// ── 카메라 시작 (후면 + 플래시) ────────────────────────
+async function start(){
+  $('startBtn').disabled = true;
+  setStatus('카메라 켜는 중…', 'wait');
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal:'environment' }, width:{ideal:640}, height:{ideal:480}, frameRate:{ideal:FPS_TARGET} },
+      audio:false
+    });
+    cam.srcObject = stream; await cam.play();
+    track = stream.getVideoTracks()[0];
+    // 플래시(torch) 켜기 — 삼성/안드로이드 크롬 지원
+    try{
+      const cap = track.getCapabilities ? track.getCapabilities() : {};
+      if(cap.torch){ await track.applyConstraints({ advanced:[{ torch:true }] }); }
+      else { setHint('플래시 미지원 기기 — 밝은 곳에서 측정하세요'); }
+    }catch(e){ setHint('플래시를 켤 수 없어요 — 밝은 곳에서 측정하세요'); }
+    beginMeasure();
+  }catch(err){
+    setStatus('카메라 권한이 필요해요', 'bad');
+    setHint('브라우저 설정에서 카메라를 허용해주세요');
+    $('startBtn').disabled = false;
+  }
+}
+
+// ── 측정 루프 ─────────────────────────────────────────
+const grab = document.createElement('canvas'); grab.width = 64; grab.height = 48;
+const gctx = grab.getContext('2d', { willReadFrequently:true });
+
+function beginMeasure(){
+  samples = []; times = []; running = true; t0 = performance.now();
+  $('resultCard').style.display = 'none';
+  setStatus('측정 중… 손가락을 가만히', 'ok');
+  loop();
+}
+
+function loop(){
+  if(!running) return;
+  const now = (performance.now() - t0) / 1000;
+  // 중앙 영역 평균 red 값 (손가락 접촉 시 혈류 신호)
+  gctx.drawImage(cam, 0, 0, grab.width, grab.height);
+  const d = gctx.getImageData(16, 12, 32, 24).data;  // 중앙 crop
+  let r = 0, g = 0, n = 0;
+  for(let i=0;i<d.length;i+=4){ r += d[i]; g += d[i+1]; n++; }
+  r/=n; g/=n;
+  const val = r;                       // red 채널 평균
+  samples.push(val); times.push(now);
+
+  // 손가락 접촉 판정: red가 충분히 높고(플래시 반사) 화면이 어둡지 않음
+  const contact = r > 80 && r > g*1.1;
+  drawWave(contact);
+  $('prog').style.width = Math.min(100, now/DURATION*100) + '%';
+  $('hint').textContent = contact ? '좋아요 — 그대로 유지하세요' : '손가락으로 카메라를 완전히 덮어주세요';
+  $('dot').className = 'dot ' + (contact ? 'ok' : 'wait');
+
+  if(now >= DURATION){ finish(); return; }
+  rafId = requestAnimationFrame(loop);
+}
+
+// ── 파형 그리기 (최근 6초) ─────────────────────────────
+function drawWave(contact){
+  const W = waveC.width, H = waveC.height;
+  wctx.clearRect(0,0,W,H);
+  const win = 6;                                   // 최근 6초
+  const lastT = times[times.length-1];
+  let s = times.length-1; while(s>0 && lastT - times[s] < win) s--;
+  const seg = samples.slice(s), tseg = times.slice(s);
+  if(seg.length < 3) return;
+  // 대역통과 근사: 이동평균 제거(detrend)
+  const ma = movavg(seg, Math.round(seg.length/6)||3);
+  const de = seg.map((v,i)=> v - ma[i]);
+  let mn = Math.min(...de), mx = Math.max(...de), rng = (mx-mn)||1;
+  wctx.strokeStyle = contact ? '#4a90e2' : '#33405a';
+  wctx.lineWidth = 2.5; wctx.beginPath();
+  for(let i=0;i<de.length;i++){
+    const x = i/(de.length-1)*W;
+    const y = H - ((de[i]-mn)/rng)*(H*0.8) - H*0.1;
+    i? wctx.lineTo(x,y) : wctx.moveTo(x,y);
+  }
+  wctx.stroke();
+}
+
+// ── 측정 종료 → HR·RMSSD·품질 계산 ─────────────────────
+function finish(){
+  running = false; cancelAnimationFrame(rafId);
+  try{ track.applyConstraints({ advanced:[{ torch:false }] }); }catch(e){}
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  setStatus('분석 중…', 'wait');
+
+  // 균일 샘플링으로 리샘플
+  const fs = 30;
+  const dur = times[times.length-1];
+  const N = Math.floor(dur*fs);
+  const rs = resample(times, samples, fs, N);
+  // detrend + 대역통과(간이 IIR 없이 이동평균 차감)
+  const base = movavg(rs, Math.round(fs*0.75));
+  let sig = rs.map((v,i)=> v - base[i]);
+  // 정규화
+  const m = mean(sig), sd = std(sig)||1; sig = sig.map(v=>(v-m)/sd);
+
+  // 신호품질: 표준편차·주기성 대략 확인
+  const good = std(rs) > 1.2 && sig.length > fs*15;
+  // 피크 검출 (최소 간격 0.4s)
+  const peaks = findPeaks(sig, Math.round(fs*0.4));
+  const rr = []; for(let i=1;i<peaks.length;i++) rr.push((peaks[i]-peaks[i-1])/fs*1000);
+  const rrc = cleanRR(rr);
+
+  if(!good || rrc.length < 8){
+    showResult(null, null, false);
+    return;
+  }
+  const meanRR = mean(rrc);
+  const hr = Math.round(60000/meanRR);
+  const diffs = []; for(let i=1;i<rrc.length;i++) diffs.push(rrc[i]-rrc[i-1]);
+  const rmssd = Math.round(Math.sqrt(mean(diffs.map(d=>d*d))));
+  showResult(hr, rmssd, true, rrc.length);
+}
+
+function showResult(hr, rmssd, ok, nbeats){
+  $('resultCard').style.display = 'block';
+  $('prog').style.width = '100%';
+  if(!ok){
+    setStatus('신호 품질 부족 — 다시 측정해주세요', 'bad');
+    $('hr').textContent = '–'; $('rmssd').textContent = '–';
+    $('verdict').className = 'verdict'; $('verdict').textContent = '재측정 필요';
+    $('quality').textContent = '손가락으로 카메라를 완전히 덮고, 움직이지 않게 유지해주세요.';
+  }else{
+    setStatus('측정 완료', 'ok');
+    $('hr').textContent = hr; $('rmssd').textContent = rmssd;
+    // 간이 등급(표시용) — 실제 판정은 서버 모델이 개인 baseline으로 계산
+    const {label, cls, note} = gradeByRMSSD(rmssd);
+    $('verdict').className = 'verdict ' + cls; $('verdict').textContent = label;
+    $('quality').textContent = `박동 ${nbeats}개 검출 · ${note}\n(참고용 등급 — 실제 판정은 서버에서 개인 기준선으로 계산)`;
+  }
+  $('startBtn').disabled = false; $('startBtn').textContent = '다시 측정';
+}
+
+// 화면 표시용 임시 등급 (절대 RMSSD 기준 — 서버 모델과 다름, 참고용)
+function gradeByRMSSD(rmssd){
+  if(rmssd >= 45) return { label:'저부하 · 안정', cls:'v-low',  note:'심박변이가 높음(안정적)' };
+  if(rmssd >= 25) return { label:'중간 · 주의',  cls:'v-mid',  note:'보통 범위' };
+  return                { label:'과부하 · 긴장',  cls:'v-high', note:'심박변이가 낮음' };
+}
+
+// ── 유틸 ──────────────────────────────────────────────
+function setStatus(t, c){ $('statusText').textContent = t; $('dot').className = 'dot '+(c||''); }
+function setHint(t){ $('hint').textContent = t; }
+function mean(a){ return a.reduce((x,y)=>x+y,0)/a.length; }
+function std(a){ const m=mean(a); return Math.sqrt(mean(a.map(v=>(v-m)**2))); }
+function movavg(a,k){ k=Math.max(1,k); const o=[]; for(let i=0;i<a.length;i++){ let s=0,c=0; for(let j=i-k;j<=i+k;j++){ if(j>=0&&j<a.length){s+=a[j];c++;} } o.push(s/c);} return o; }
+function resample(t,v,fs,N){ const o=[]; for(let i=0;i<N;i++){ const tt=i/fs; let j=1; while(j<t.length && t[j]<tt) j++; const t0=t[j-1],t1=t[j]||t0+1e-3,v0=v[j-1],v1=v[j]||v0; const f=(tt-t0)/((t1-t0)||1e-3); o.push(v0+(v1-v0)*f);} return o; }
+function findPeaks(s, minDist){ const p=[]; for(let i=1;i<s.length-1;i++){ if(s[i]>s[i-1]&&s[i]>=s[i+1]&&s[i]>0.3){ if(p.length===0||i-p[p.length-1]>=minDist) p.push(i); else if(s[i]>s[p[p.length-1]]) p[p.length-1]=i; } } return p; }
+function cleanRR(rr){ const f=rr.filter(x=>x>=300&&x<=1500); if(f.length<3) return f; const med=f.slice().sort((a,b)=>a-b)[Math.floor(f.length/2)]; return f.filter(x=>Math.abs(x-med)<=0.35*med); }
+
+$('startBtn').addEventListener('click', start);
+</script>
+</body>
+</html>
