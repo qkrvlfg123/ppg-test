@@ -72,19 +72,11 @@
     <div class="score" id="score"></div>
   </div>
 
-  <!-- 설정 (서버 주소·이름) -->
-  <div class="card" id="cfgCard" style="padding:12px">
-    <div style="font-size:13px;color:var(--mut);margin-bottom:8px">측정 전 설정 (한 번만)</div>
-    <input id="serverUrl" placeholder="서버 주소 (예: http://192.168.0.5:5000)" style="width:100%;padding:11px;border-radius:10px;border:0;background:#0b1018;color:var(--ink);margin-bottom:8px;font-size:14px">
-    <input id="userId" placeholder="본인 ID (예: P01)" style="width:100%;padding:11px;border-radius:10px;border:0;background:#0b1018;color:var(--ink);font-size:14px">
-    <div class="small" id="srvState" style="text-align:left;margin-top:8px"></div>
-  </div>
-
   <!-- 결과 -->
   <div class="card result" id="resultCard">
     <div class="grid">
       <div class="metric"><div class="lab">심박수</div><div class="val"><span id="hr">–</span> <span class="unit">bpm</span></div></div>
-      <div class="metric"><div class="lab">상태</div><div class="val" style="font-size:20px"><span id="grade">–</span></div></div>
+      <div class="metric"><div class="lab">RMSSD</div><div class="val"><span id="rmssd">–</span> <span class="unit">ms</span></div></div>
     </div>
     <div class="verdict" id="verdict">–</div>
     <div class="small" id="quality"></div>
@@ -92,7 +84,7 @@
   </div>
 
   <button id="startBtn">측정 시작</button>
-  <div class="small">측정 30초 · 플래시가 자동으로 켜졌다가 끝나면 꺼집니다. 손가락은 움직이지 마세요.<br>서버 주소를 넣으면 측정이 서버에 저장되고 정확한 판정을 받습니다.</div>
+  <div class="small">측정 30초 · 플래시가 자동으로 켜졌다가 끝나면 꺼집니다. 손가락은 움직이지 마세요.<br>테스트용이며 아직 데이터는 저장되지 않습니다.</div>
 </div>
 
 <video id="cam" playsinline muted></video>
@@ -212,8 +204,8 @@ function drawWave(contact){
   wctx.stroke();
 }
 
-// ── 종료·분석: 원파형을 서버로 보내 정확 계산 ──
-async function finish(){
+// ── 종료·분석 (파이썬 파이프라인 수준) ──
+function finish(){
   running=false; cancelAnimationFrame(rafId);
   try{ track.applyConstraints({advanced:[{torch:false}]}); }catch(e){}
   if(stream) stream.getTracks().forEach(t=>t.stop());
@@ -221,36 +213,25 @@ async function finish(){
   setStatus('분석 중…','wait'); $('gameArea').style.display='none';
 
   const dur=times[times.length-1]||0;
-  // 균일 30fps '원파형'을 서버로. 필터·HRV·판정은 서버가 검증된 파이썬으로 처리.
-  const waveRaw=resample(times,samples,FS,Math.floor(dur*FS));
+  // 1) 리샘플 → 2) 대역통과 0.7~3.5Hz → 3) 업샘플(피크 해상도) → 4) 피크 → 5) RR 보정
+  let sig=resample(times,samples,FS,Math.floor(dur*FS));
+  sig=medfilt(sig,3);            // 튀는 점 스무딩(희한한 파형 완화)
+  sig=bandpass(sig,FS,0.7,3.5);
+  const up=4, FSU=FS*up;
+  sig=upsample(sig,up);
+  const m=mean(sig), sd=std(sig)||1; sig=sig.map(v=>(v-m)/sd);
 
-  // 폰 로컬은 빠른 피드백용 심박수만(신뢰 높음). RMSSD 등은 서버 계산.
-  let sig=bandpass(waveRaw.slice(),FS,0.7,3.5); sig=upsample(sig,4); const FSU=FS*4;
-  const m=mean(sig),sd=std(sig)||1; sig=sig.map(v=>(v-m)/sd);
-  const pk=detectPeaks(sig,FSU); let rr=[]; for(let i=1;i<pk.length;i++) rr.push((pk[i]-pk[i-1])/FSU*1000);
-  const rrc=correctRR(rr).rr;
-  const localHR = rrc.length? Math.round(60000/median(rrc)) : null;
-  const signalOk = rrc.length>=4 && localHR>=40 && localHR<=180;
-  if(!signalOk){ showResult(null,false,'신호가 약해요'); return; }
+  const peaks=detectPeaks(sig,FSU);
+  let rr=[]; for(let i=1;i<peaks.length;i++) rr.push((peaks[i]-peaks[i-1])/FSU*1000);
+  const cor=correctRR(rr); const rrc=cor.rr;
 
-  const url=($('serverUrl').value||'').trim().replace(/\/$/,'');
-  if(!url){ showResult(localHR,true,null,'서버 주소를 넣으면 정확한 판정을 받아요(지금은 심박수만).'); return; }
-  setStatus('서버로 전송 중…','wait');
-  try{
-    const r=await fetch(url+'/measure',{ method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ user_id:($('userId').value||'anon').trim(), fps:FS, trigger:'manual', waveform:waveRaw }) });
-    const j=await r.json();
-    if(j.status==='ok'){
-      const score=(j.score!=null?` (${j.score}점)`:'');
-      showResult(localHR,true,null,`저장 완료 ✅${score}`, j.grade||'—');
-    }else if(j.status==='low_quality'||j.status==='insufficient_beats'){
-      showResult(localHR,false,'신호 품질 부족(서버) — 다시');
-    }else{
-      showResult(localHR,true,null,`측정 저장됨 · 서버 상태: ${j.status}`);
-    }
-  }catch(e){
-    showResult(localHR,true,null,'서버에 못 닿았어요 — 주소 확인(심박수는 로컬값).');
-  }
+  let hr=null; if(rrc.length) hr=Math.round(60000/median(rrc));
+  // 완화: 박동 4개 이상 + 심박 40~180이면 통과 (아티팩트율로는 막지 않음 — 보간이 이미 처리)
+  const ok = rrc.length>=4 && hr>=40 && hr<=180;
+  if(!ok){ showResult(null,null,false); return; }
+  const diffs=[]; for(let i=1;i<rrc.length;i++) diffs.push(rrc[i]-rrc[i-1]);
+  let rmssd=Math.round(Math.sqrt(mean(diffs.map(d=>d*d))));
+  showResult(hr,rmssd,true,rrc.length);
 }
 
 // 대역통과 근사(저역통과 후 고역통과) — 심박 대역만 통과, 잔떨림 제거
@@ -270,7 +251,7 @@ function detectPeaks(s,fs){
   return pass(refr,0.12);
 }
 
-// RR 아티팩트 보정 (삭제 아닌 보간)
+// RR 아티팩트 보정 (삭제 아닌 보간 — RMSSD 폭등 방지)
 function correctRR(rr){ const n0=rr.length; if(n0<3) return {rr:rr.filter(x=>x>=300&&x<=1500),removedRatio:0};
   let art=rr.map(x=>x<300||x>1500);
   for(let pass=0;pass<2;pass++){ for(let i=0;i<n0;i++){ const lo=Math.max(0,i-3),hi=Math.min(n0,i+4),local=[]; for(let j=lo;j<hi;j++) if(!art[j]) local.push(rr[j]); if(local.length){ const med=median(local); if(Math.abs(rr[i]-med)>0.3*med) art[i]=true; } } }
@@ -279,26 +260,26 @@ function correctRR(rr){ const n0=rr.length; if(n0<3) return {rr:rr.filter(x=>x>=
   const out=rr.slice(); for(let i=0;i<n0;i++) if(art[i]) out[i]=interp(i,gi,gv); return {rr:out,removedRatio}; }
 function interp(i,xs,ys){ if(i<=xs[0])return ys[0]; if(i>=xs[xs.length-1])return ys[ys.length-1]; let k=1; while(xs[k]<i)k++; const f=(i-xs[k-1])/(xs[k]-xs[k-1]); return ys[k-1]+(ys[k]-ys[k-1])*f; }
 function median(a){ const b=a.slice().sort((x,y)=>x-y); return b[Math.floor(b.length/2)]; }
+function medfilt(x,k){ const o=[]; for(let i=0;i<x.length;i++){ const w=[]; for(let j=i-k;j<=i+k;j++) if(j>=0&&j<x.length) w.push(x[j]); o.push(median(w)); } return o; }
 
-// ok:신호충분 / failMsg / note:하단문구 / gradeText:서버등급
-function showResult(hr, ok, failMsg, note, gradeText){
+function showResult(hr,rmssd,ok,nbeats){
   $('resultCard').style.display='block'; $('prog').style.width='100%';
   if(!ok){
-    setStatus(failMsg||'신호가 약해요','bad');
-    $('hr').textContent='–'; $('grade').textContent='–';
-    $('verdict').className='verdict'; $('verdict').textContent=failMsg||'신호가 약해요';
-    $('quality').textContent='아래 “🔄 다시 측정”을 눌러주세요. 렌즈를 완전히 덮고, 세게 누르지 말고 가만히.';
+    setStatus('신호가 약해요 — 다시 해볼까요?','bad');
+    $('hr').textContent='–'; $('rmssd').textContent='–';
+    $('verdict').className='verdict'; $('verdict').textContent='신호가 약해요';
+    $('quality').textContent='아래 “🔄 다시 측정”을 눌러주세요.\n손가락으로 렌즈를 완전히 덮되, 너무 세게 누르지 말고 가볍게 얹어주세요.';
   }else{
     setStatus('측정 완료 🎉','ok');
-    $('hr').textContent = hr!=null? hr : '–';
-    const g = gradeText||'–'; $('grade').textContent = g;
-    const cls = g==='과부하'?'v-high':(g==='중간'?'v-mid':(g==='저부하'?'v-low':''));
-    $('verdict').className='verdict '+cls; $('verdict').textContent = g!=='–'? g : '측정 완료';
-    $('quality').textContent = note||'';
+    $('hr').textContent=hr; $('rmssd').textContent=rmssd;
+    const {label,cls,note}=grade(rmssd);
+    $('verdict').className='verdict '+cls; $('verdict').textContent=label;
+    $('quality').textContent=`박동 ${nbeats}개 · 게임 점수 ${score}점 · ${note}\n(참고용 등급 — 실제 판정은 서버에서 개인 기준선으로)`;
   }
   $('gameArea').style.display='none';
   $('startBtn').disabled=false; $('startBtn').textContent='다시 측정';
 }
+function grade(rmssd){ if(rmssd>=45) return {label:'저부하 · 안정',cls:'v-low',note:'변이 높음(안정)'}; if(rmssd>=25) return {label:'중간 · 주의',cls:'v-mid',note:'보통'}; return {label:'과부하 · 긴장',cls:'v-high',note:'변이 낮음'}; }
 
 // ── 유틸 ──
 function setStatus(t,c){ $('statusText').textContent=t; $('dot').className='dot '+(c||''); }
@@ -308,15 +289,6 @@ function movavg(a,k){ k=Math.max(1,k); const o=[]; for(let i=0;i<a.length;i++){ 
 function resample(t,v,fs,N){ const o=[]; for(let i=0;i<N;i++){ const tt=i/fs; let j=1; while(j<t.length&&t[j]<tt) j++; const t0=t[j-1],t1=t[j]||t0+1e-3,v0=v[j-1],v1=v[j]||v0; const f=(tt-t0)/((t1-t0)||1e-3); o.push(v0+(v1-v0)*f);} return o; }
 function findPeaks(s,minDist){ const p=[]; for(let i=1;i<s.length-1;i++){ if(s[i]>s[i-1]&&s[i]>=s[i+1]&&s[i]>0.2){ if(p.length===0||i-p[p.length-1]>=minDist) p.push(i); else if(s[i]>s[p[p.length-1]]) p[p.length-1]=i; } } return p; }
 function cleanRR(rr){ const f=rr.filter(x=>x>=300&&x<=1500); if(f.length<3) return f; const med=f.slice().sort((a,b)=>a-b)[Math.floor(f.length/2)]; return f.filter(x=>Math.abs(x-med)<=0.4*med); }
-
-// 서버 주소·이름 기억
-try{ $('serverUrl').value=localStorage.getItem('ppg_srv')||''; $('userId').value=localStorage.getItem('ppg_uid')||''; }catch(e){}
-function saveCfg(){ try{ localStorage.setItem('ppg_srv',$('serverUrl').value.trim()); localStorage.setItem('ppg_uid',$('userId').value.trim()); }catch(e){} }
-$('serverUrl').addEventListener('change', saveCfg); $('userId').addEventListener('change', saveCfg);
-// 서버 연결 확인 표시
-async function pingServer(){ const u=($('serverUrl').value||'').trim().replace(/\/$/,''); const el=$('srvState'); if(!u){ el.textContent=''; return; } el.textContent='서버 확인 중…'; try{ const r=await fetch(u+'/health'); const j=await r.json(); el.innerHTML='<span style="color:var(--green)">● 서버 연결됨</span> · 모델 '+(j.model_loaded?'로드':'없음')+' · 누적 '+j.n_measurements+'건'; }catch(e){ el.innerHTML='<span style="color:var(--red)">● 서버에 못 닿음</span> — 주소/같은 와이파이 확인'; } }
-$('serverUrl').addEventListener('change', pingServer);
-window.addEventListener('load', ()=>{ if($('serverUrl').value) pingServer(); });
 
 $('startBtn').addEventListener('click', start);
 $('retryBtn').addEventListener('click', start);
