@@ -80,6 +80,7 @@
     </div>
     <div class="verdict" id="verdict">–</div>
     <div class="small" id="quality"></div>
+    <button id="retryBtn" style="margin-top:12px;background:var(--green)">🔄 다시 측정</button>
   </div>
 
   <button id="startBtn">측정 시작</button>
@@ -220,7 +221,7 @@ function finish(){
   const cor=correctRR(rr); const rrc=cor.rr;
 
   let hr=null; if(rrc.length) hr=Math.round(60000/median(rrc));
-  const ok = rrc.length>=6 && hr>=45 && hr<=160 && cor.removedRatio<0.4;
+  const ok = rrc.length>=5 && hr>=45 && hr<=170 && cor.removedRatio<0.55;
   if(!ok){ showResult(null,null,false); return; }
   const diffs=[]; for(let i=1;i<rrc.length;i++) diffs.push(rrc[i]-rrc[i-1]);
   let rmssd=Math.round(Math.sqrt(mean(diffs.map(d=>d*d))));
@@ -259,8 +260,8 @@ function showResult(hr,rmssd,ok,nbeats){
   if(!ok){
     setStatus('신호가 약해요 — 다시 해볼까요?','bad');
     $('hr').textContent='–'; $('rmssd').textContent='–';
-    $('verdict').className='verdict'; $('verdict').textContent='다시 측정';
-    $('quality').textContent='손가락으로 렌즈를 완전히 덮고, 너무 세게 누르지 말고 가볍게 얹어주세요.';
+    $('verdict').className='verdict'; $('verdict').textContent='신호가 약해요';
+    $('quality').textContent='아래 “🔄 다시 측정”을 눌러주세요.\n손가락으로 렌즈를 완전히 덮되, 너무 세게 누르지 말고 가볍게 얹어주세요.';
   }else{
     setStatus('측정 완료 🎉','ok');
     $('hr').textContent=hr; $('rmssd').textContent=rmssd;
@@ -283,6 +284,7 @@ function findPeaks(s,minDist){ const p=[]; for(let i=1;i<s.length-1;i++){ if(s[i
 function cleanRR(rr){ const f=rr.filter(x=>x>=300&&x<=1500); if(f.length<3) return f; const med=f.slice().sort((a,b)=>a-b)[Math.floor(f.length/2)]; return f.filter(x=>Math.abs(x-med)<=0.4*med); }
 
 $('startBtn').addEventListener('click', start);
+$('retryBtn').addEventListener('click', start);
 </script>
 </body>
 </html>
