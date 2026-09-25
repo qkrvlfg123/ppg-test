@@ -242,21 +242,21 @@ function onepole(x,a,low){ const y=new Array(x.length); let prev=x[0]||0,py=0;
   for(let i=0;i<x.length;i++){ if(low){ py=a*py+(1-a)*x[i]; y[i]=py; } else { py=a*(py+x[i]-prev); y[i]=py; prev=x[i]; } } return y; }
 function upsample(x,f){ const o=[]; for(let i=0;i<x.length-1;i++){ for(let k=0;k<f;k++) o.push(x[i]+(x[i+1]-x[i])*k/f); } o.push(x[x.length-1]); return o; }
 
-// 2단계 적응형 피크: 1차 대략 검출 → 중앙 RR로 불응기(0.55×medRR) 재설정 → 재검출
+// 2단계 적응형 피크: 1차 대략 검출 → 중앙 RR로 불응기(0.40×medRR) 재설정 → 재검출
 function detectPeaks(s,fs){
   const ma=movavg(s,Math.round(fs*0.75));
   const pass=(minD,thr)=>{ const p=[]; for(let i=1;i<s.length-1;i++){ if(s[i]>s[i-1]&&s[i]>=s[i+1]&&s[i]>ma[i]+thr){ if(p.length===0||i-p[p.length-1]>=minD) p.push(i); else if(s[i]>s[p[p.length-1]]) p[p.length-1]=i; } } return p; };
-  const p1=pass(Math.round(fs*0.33),0.3);
+  const p1=pass(Math.round(fs*0.30),0.15);
   if(p1.length<4) return p1;
   const rr1=[]; for(let i=1;i<p1.length;i++) rr1.push(p1[i]-p1[i-1]);
-  const medRR=median(rr1), refr=Math.max(Math.round(fs*0.30), Math.round(medRR*0.55));
-  return pass(refr,0.25);
+  const medRR=median(rr1), refr=Math.max(Math.round(fs*0.28), Math.round(medRR*0.40));
+  return pass(refr,0.12);
 }
 
 // RR 아티팩트 보정 (삭제 아닌 보간 — RMSSD 폭등 방지)
 function correctRR(rr){ const n0=rr.length; if(n0<3) return {rr:rr.filter(x=>x>=300&&x<=1500),removedRatio:0};
   let art=rr.map(x=>x<300||x>1500);
-  for(let pass=0;pass<2;pass++){ for(let i=0;i<n0;i++){ const lo=Math.max(0,i-3),hi=Math.min(n0,i+4),local=[]; for(let j=lo;j<hi;j++) if(!art[j]) local.push(rr[j]); if(local.length){ const med=median(local); if(Math.abs(rr[i]-med)>0.25*med) art[i]=true; } } }
+  for(let pass=0;pass<2;pass++){ for(let i=0;i<n0;i++){ const lo=Math.max(0,i-3),hi=Math.min(n0,i+4),local=[]; for(let j=lo;j<hi;j++) if(!art[j]) local.push(rr[j]); if(local.length){ const med=median(local); if(Math.abs(rr[i]-med)>0.3*med) art[i]=true; } } }
   const gi=[],gv=[]; for(let i=0;i<n0;i++) if(!art[i]){gi.push(i);gv.push(rr[i]);}
   const removedRatio=(n0-gi.length)/n0; if(gi.length<3) return {rr:gv,removedRatio};
   const out=rr.slice(); for(let i=0;i<n0;i++) if(art[i]) out[i]=interp(i,gi,gv); return {rr:out,removedRatio}; }
