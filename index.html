@@ -200,7 +200,7 @@ function drawWave(contact){
   wctx.stroke();
 }
 
-// ── 종료·분석 ──
+// ── 종료·분석 (파이썬 파이프라인 수준) ──
 function finish(){
   running=false; cancelAnimationFrame(rafId);
   try{ track.applyConstraints({advanced:[{torch:false}]}); }catch(e){}
@@ -208,21 +208,51 @@ function finish(){
   setStatus('분석 중…','wait'); $('gameArea').style.display='none';
 
   const dur=times[times.length-1]||0;
-  const rs=resample(times,samples,FS,Math.floor(dur*FS));
-  const base=movavg(rs,Math.round(FS*0.8)); let sig=rs.map((v,i)=>v-base[i]);
+  // 1) 리샘플 → 2) 대역통과 0.7~3.5Hz → 3) 업샘플(피크 해상도) → 4) 피크 → 5) RR 보정
+  let sig=resample(times,samples,FS,Math.floor(dur*FS));
+  sig=bandpass(sig,FS,0.7,3.5);
+  const up=4, FSU=FS*up;
+  sig=upsample(sig,up);
   const m=mean(sig), sd=std(sig)||1; sig=sig.map(v=>(v-m)/sd);
-  const peaks=findPeaks(sig,Math.round(FS*0.4));
-  const rr=[]; for(let i=1;i<peaks.length;i++) rr.push((peaks[i]-peaks[i-1])/FS*1000);
-  const rrc=cleanRR(rr);
 
-  // 완화된 품질 기준: 박동 6개 이상 + 심박 정상범위면 통과
-  let hr=null; if(rrc.length) hr=Math.round(60000/mean(rrc));
-  const ok = rrc.length>=6 && hr>=45 && hr<=160;
+  const peaks=detectPeaks(sig,FSU);
+  let rr=[]; for(let i=1;i<peaks.length;i++) rr.push((peaks[i]-peaks[i-1])/FSU*1000);
+  const cor=correctRR(rr); const rrc=cor.rr;
+
+  let hr=null; if(rrc.length) hr=Math.round(60000/median(rrc));
+  const ok = rrc.length>=6 && hr>=45 && hr<=160 && cor.removedRatio<0.4;
   if(!ok){ showResult(null,null,false); return; }
   const diffs=[]; for(let i=1;i<rrc.length;i++) diffs.push(rrc[i]-rrc[i-1]);
-  const rmssd=Math.round(Math.sqrt(mean(diffs.map(d=>d*d))));
+  let rmssd=Math.round(Math.sqrt(mean(diffs.map(d=>d*d))));
   showResult(hr,rmssd,true,rrc.length);
 }
+
+// 대역통과 근사(저역통과 후 고역통과) — 심박 대역만 통과, 잔떨림 제거
+function bandpass(x,fs,lo,hi){ return onepole(onepole(x,Math.exp(-2*Math.PI*hi/fs),true),Math.exp(-2*Math.PI*lo/fs),false); }
+function onepole(x,a,low){ const y=new Array(x.length); let prev=x[0]||0,py=0;
+  for(let i=0;i<x.length;i++){ if(low){ py=a*py+(1-a)*x[i]; y[i]=py; } else { py=a*(py+x[i]-prev); y[i]=py; prev=x[i]; } } return y; }
+function upsample(x,f){ const o=[]; for(let i=0;i<x.length-1;i++){ for(let k=0;k<f;k++) o.push(x[i]+(x[i+1]-x[i])*k/f); } o.push(x[x.length-1]); return o; }
+
+// 2단계 적응형 피크: 1차 대략 검출 → 중앙 RR로 불응기(0.55×medRR) 재설정 → 재검출
+function detectPeaks(s,fs){
+  const ma=movavg(s,Math.round(fs*0.75));
+  const pass=(minD,thr)=>{ const p=[]; for(let i=1;i<s.length-1;i++){ if(s[i]>s[i-1]&&s[i]>=s[i+1]&&s[i]>ma[i]+thr){ if(p.length===0||i-p[p.length-1]>=minD) p.push(i); else if(s[i]>s[p[p.length-1]]) p[p.length-1]=i; } } return p; };
+  const p1=pass(Math.round(fs*0.33),0.3);
+  if(p1.length<4) return p1;
+  const rr1=[]; for(let i=1;i<p1.length;i++) rr1.push(p1[i]-p1[i-1]);
+  const medRR=median(rr1), refr=Math.max(Math.round(fs*0.30), Math.round(medRR*0.55));
+  return pass(refr,0.25);
+}
+
+// RR 아티팩트 보정 (삭제 아닌 보간 — RMSSD 폭등 방지)
+function correctRR(rr){ const n0=rr.length; if(n0<3) return {rr:rr.filter(x=>x>=300&&x<=1500),removedRatio:0};
+  let art=rr.map(x=>x<300||x>1500);
+  for(let pass=0;pass<2;pass++){ for(let i=0;i<n0;i++){ const lo=Math.max(0,i-3),hi=Math.min(n0,i+4),local=[]; for(let j=lo;j<hi;j++) if(!art[j]) local.push(rr[j]); if(local.length){ const med=median(local); if(Math.abs(rr[i]-med)>0.25*med) art[i]=true; } } }
+  const gi=[],gv=[]; for(let i=0;i<n0;i++) if(!art[i]){gi.push(i);gv.push(rr[i]);}
+  const removedRatio=(n0-gi.length)/n0; if(gi.length<3) return {rr:gv,removedRatio};
+  const out=rr.slice(); for(let i=0;i<n0;i++) if(art[i]) out[i]=interp(i,gi,gv); return {rr:out,removedRatio}; }
+function interp(i,xs,ys){ if(i<=xs[0])return ys[0]; if(i>=xs[xs.length-1])return ys[ys.length-1]; let k=1; while(xs[k]<i)k++; const f=(i-xs[k-1])/(xs[k]-xs[k-1]); return ys[k-1]+(ys[k]-ys[k-1])*f; }
+function median(a){ const b=a.slice().sort((x,y)=>x-y); return b[Math.floor(b.length/2)]; }
 
 function showResult(hr,rmssd,ok,nbeats){
   $('resultCard').style.display='block'; $('prog').style.width='100%';
