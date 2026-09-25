@@ -54,12 +54,13 @@
 <body>
 <div class="wrap">
   <h1>손가락 PPG 측정</h1>
-  <div class="sub">한 손가락으로 후면 카메라를 살짝 덮고, 반대 손으로 리듬에 맞춰 톡!</div>
+  <div class="sub">밝은 곳에서 · 후면 카메라를 손가락으로 살짝 덮고 · 30초</div>
 
   <div class="card">
     <div class="status"><span id="dot" class="dot"></span><span id="statusText">시작을 누르면 카메라가 켜집니다</span></div>
     <canvas id="wave" width="440" height="72"></canvas>
     <div class="bar"><i id="prog"></i></div>
+    <button id="torchBtn" style="display:none;margin-top:8px;background:#5b6b8c;padding:11px;font-size:14px">🔦 플래시 켜기 (신호 약할 때)</button>
   </div>
 
   <!-- 게임 영역 -->
@@ -84,7 +85,7 @@
   </div>
 
   <button id="startBtn">측정 시작</button>
-  <div class="small">측정 20초 · 플래시가 켜집니다. 측정하는 손가락은 움직이지 마세요.<br>테스트용이며 아직 데이터는 저장되지 않습니다.</div>
+  <div class="small">측정 30초 · 기본은 플래시 없이(안 뜨거움). 신호 약하면 플래시 켜기 버튼이 떠요.<br>테스트용이며 아직 데이터는 저장되지 않습니다.</div>
 </div>
 
 <video id="cam" playsinline muted></video>
@@ -92,10 +93,11 @@
 <script>
 // ── 설정 ──
 const WARMUP = 3;        // 안정화(초)
-const DURATION = 20;     // 측정(초)
+const DURATION = 30;     // 측정(초)
 const FS = 30;
 const BREATH = 4.0;      // 들숨/날숨 각 4초 (호흡 유도 리듬)
 let stream, track, rafId, running=false, phase='idle', t0=0, warmT0=0;
+let torchAvail=false, torchOn=false, weakCount=0;
 let samples=[], times=[];
 let score=0, lastTapBeat=-1;
 
@@ -112,10 +114,12 @@ async function start(){
       video:{ facingMode:{ideal:'environment'}, width:{ideal:640}, height:{ideal:480}, frameRate:{ideal:FS} }, audio:false });
     cam.srcObject=stream; await cam.play();
     track=stream.getVideoTracks()[0];
-    try{ const cap=track.getCapabilities?track.getCapabilities():{}; if(cap.torch) await track.applyConstraints({advanced:[{torch:true}]}); }catch(e){}
+    // 플래시는 기본 OFF (발열 방지). 신호 약하면 사용자가 버튼으로 켬.
+    try{ const cap=track.getCapabilities?track.getCapabilities():{}; torchAvail = !!(cap && cap.torch); }catch(e){ torchAvail=false; }
+    torchOn=false; updateTorchBtn();
     // 안정화 단계 시작
     samples=[]; times=[]; score=0; lastTapBeat=-1; running=true; phase='warmup'; warmT0=performance.now();
-    $('breathText').textContent='손가락을 대고 잠시만요…';
+    $('breathText').textContent='손가락을 대고 잠시만요…'; updateTorchBtn();
     loop();
   }catch(err){
     setStatus('카메라 권한이 필요해요','bad'); $('breathText').textContent='브라우저에서 카메라를 허용해주세요'; $('startBtn').disabled=false;
@@ -152,7 +156,8 @@ function loop(){
   const now=(performance.now()-t0)/1000;
   samples.push(s.r); times.push(now);
   $('dot').className='dot '+(s.contact?'ok':'wait');
-  setStatus(s.contact?'측정 중… 손가락 그대로':'신호 약함 — 살짝 더 눌러요', s.contact?'ok':'wait');
+  if(!s.contact){ weakCount++; } else { weakCount=Math.max(0,weakCount-1); }
+  setStatus(s.contact?'측정 중… 손가락 그대로':(torchAvail&&!torchOn&&weakCount>25?'신호 약해요 — 아래 플래시를 켜보세요':'신호 약함 — 살짝 더 눌러요'), s.contact?'ok':'wait');
   $('prog').style.width=Math.min(100,now/DURATION*100)+'%';
   drawWave(s.contact); breathe(now);
   if(now>=DURATION){ finish(); return; }
@@ -206,6 +211,7 @@ function finish(){
   running=false; cancelAnimationFrame(rafId);
   try{ track.applyConstraints({advanced:[{torch:false}]}); }catch(e){}
   if(stream) stream.getTracks().forEach(t=>t.stop());
+  torchOn=false; phase='idle'; updateTorchBtn();
   setStatus('분석 중…','wait'); $('gameArea').style.display='none';
 
   const dur=times[times.length-1]||0;
@@ -256,6 +262,8 @@ function correctRR(rr){ const n0=rr.length; if(n0<3) return {rr:rr.filter(x=>x>=
   const out=rr.slice(); for(let i=0;i<n0;i++) if(art[i]) out[i]=interp(i,gi,gv); return {rr:out,removedRatio}; }
 function interp(i,xs,ys){ if(i<=xs[0])return ys[0]; if(i>=xs[xs.length-1])return ys[ys.length-1]; let k=1; while(xs[k]<i)k++; const f=(i-xs[k-1])/(xs[k]-xs[k-1]); return ys[k-1]+(ys[k]-ys[k-1])*f; }
 function median(a){ const b=a.slice().sort((x,y)=>x-y); return b[Math.floor(b.length/2)]; }
+async function toggleTorch(){ if(!track||!torchAvail) return; torchOn=!torchOn; try{ await track.applyConstraints({advanced:[{torch:torchOn}]}); }catch(e){} updateTorchBtn(); }
+function updateTorchBtn(){ const b=$('torchBtn'); if(!b) return; if(torchAvail && phase!=='idle'){ b.style.display='block'; b.textContent = torchOn ? '🔦 플래시 끄기 (뜨거우면)' : '🔦 플래시 켜기 (신호 약할 때)'; } else b.style.display='none'; }
 function medfilt(x,k){ const o=[]; for(let i=0;i<x.length;i++){ const w=[]; for(let j=i-k;j<=i+k;j++) if(j>=0&&j<x.length) w.push(x[j]); o.push(median(w)); } return o; }
 
 function showResult(hr,rmssd,ok,nbeats){
@@ -288,6 +296,7 @@ function cleanRR(rr){ const f=rr.filter(x=>x>=300&&x<=1500); if(f.length<3) retu
 
 $('startBtn').addEventListener('click', start);
 $('retryBtn').addEventListener('click', start);
+$('torchBtn').addEventListener('click', toggleTorch);
 </script>
 </body>
 </html>
