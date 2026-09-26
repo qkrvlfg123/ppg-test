@@ -63,7 +63,7 @@
   </div>
 
   <!-- 게임 영역 -->
-  <div class="game" id="gameArea">
+  <div class="game" id="gameArea" style="display:none">
     <div class="breathText" id="breathText">준비되면 측정을 시작하세요</div>
     <div class="breathWrap" id="tapZone">
       <div class="ring" id="ring"></div>
@@ -237,7 +237,7 @@ async function finish(){
   if(!url){ showResult(localHR,true,null,'서버 주소를 넣으면 정확한 판정을 받아요(지금은 심박수만).'); return; }
   setStatus('서버로 전송 중…','wait');
   try{
-    const r=await fetch(url+'/measure',{ method:'POST', headers:{'Content-Type':'application/json'},
+    const r=await fetch(url+'/measure',{ method:'POST', headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},
       body:JSON.stringify({ user_id:($('userId').value||'anon').trim(), fps:FS, trigger:'manual', waveform:waveRaw }) });
     const j=await r.json();
     if(j.status==='ok'){
@@ -310,11 +310,23 @@ function findPeaks(s,minDist){ const p=[]; for(let i=1;i<s.length-1;i++){ if(s[i
 function cleanRR(rr){ const f=rr.filter(x=>x>=300&&x<=1500); if(f.length<3) return f; const med=f.slice().sort((a,b)=>a-b)[Math.floor(f.length/2)]; return f.filter(x=>Math.abs(x-med)<=0.4*med); }
 
 // 서버 주소·이름 기억
-try{ $('serverUrl').value=localStorage.getItem('ppg_srv')||''; $('userId').value=localStorage.getItem('ppg_uid')||''; }catch(e){}
+// QR 주소의 파라미터(?server=...&user=...) 우선, 없으면 저장값
+const DEFAULT_SERVER='https://pillymon-ppg-server.onrender.com';
+$('serverUrl').value = DEFAULT_SERVER;
+try{
+  const q=new URLSearchParams(location.search);
+  const qs=q.get('server'), qu=q.get('user');
+  // 예전에 저장된 ngrok 임시 주소는 무시하고 기본 서버로
+  let saved=localStorage.getItem('ppg_srv')||'';
+  if(/ngrok/i.test(saved)) saved='';
+  $('serverUrl').value = qs || saved || DEFAULT_SERVER;
+  $('userId').value    = qu || localStorage.getItem('ppg_uid') || '';
+  if(qs||qu){ localStorage.setItem('ppg_srv',$('serverUrl').value.trim()); localStorage.setItem('ppg_uid',$('userId').value.trim()); }
+}catch(e){}
 function saveCfg(){ try{ localStorage.setItem('ppg_srv',$('serverUrl').value.trim()); localStorage.setItem('ppg_uid',$('userId').value.trim()); }catch(e){} }
 $('serverUrl').addEventListener('change', saveCfg); $('userId').addEventListener('change', saveCfg);
 // 서버 연결 확인 표시
-async function pingServer(){ const u=($('serverUrl').value||'').trim().replace(/\/$/,''); const el=$('srvState'); if(!u){ el.textContent=''; return; } el.textContent='서버 확인 중…'; try{ const r=await fetch(u+'/health'); const j=await r.json(); el.innerHTML='<span style="color:var(--green)">● 서버 연결됨</span> · 모델 '+(j.model_loaded?'로드':'없음')+' · 누적 '+j.n_measurements+'건'; }catch(e){ el.innerHTML='<span style="color:var(--red)">● 서버에 못 닿음</span> — 주소/같은 와이파이 확인'; } }
+async function pingServer(){ const u=($('serverUrl').value||'').trim().replace(/\/$/,''); const el=$('srvState'); if(!u){ el.textContent=''; return; } el.textContent='서버 확인 중…'; try{ const r=await fetch(u+'/health',{headers:{'ngrok-skip-browser-warning':'1'}}); const j=await r.json(); el.innerHTML='<span style="color:var(--green)">● 서버 연결됨</span> · 모델 '+(j.model_loaded?'로드':'없음')+(j.n_measurements!=null?' · 누적 '+j.n_measurements+'건':''); }catch(e){ el.innerHTML='<span style="color:var(--red)">● 서버에 못 닿음</span> — 주소/같은 와이파이 확인'; } }
 $('serverUrl').addEventListener('change', pingServer);
 window.addEventListener('load', ()=>{ if($('serverUrl').value) pingServer(); });
 
