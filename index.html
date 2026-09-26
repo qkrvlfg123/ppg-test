@@ -73,10 +73,17 @@
   </div>
 
   <!-- 설정 (서버 주소·이름) -->
-  <div class="card" id="cfgCard" style="padding:12px">
-    <div style="font-size:13px;color:var(--mut);margin-bottom:8px">측정 전 설정 (한 번만)</div>
-    <input id="serverUrl" placeholder="서버 주소 (예: http://192.168.0.5:5000)" style="width:100%;padding:11px;border-radius:10px;border:0;background:#0b1018;color:var(--ink);margin-bottom:8px;font-size:14px">
-    <input id="userId" placeholder="본인 ID (예: P01)" style="width:100%;padding:11px;border-radius:10px;border:0;background:#0b1018;color:var(--ink);font-size:14px">
+  <div class="card" id="cfgCard" style="padding:14px">
+    <div style="font-size:14px;color:var(--ink);font-weight:700;margin-bottom:6px">본인 ID 입력</div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:8px">이니셜(영문) + 숫자 4자리 · 예: KCS1234</div>
+    <input id="userId" placeholder="예: KCS1234" autocapitalize="characters" autocomplete="off"
+      style="width:100%;padding:14px;border-radius:10px;border:0;background:#0b1018;color:var(--ink);font-size:17px;font-weight:700;letter-spacing:1px">
+    <div id="idHint" class="small" style="text-align:left;margin-top:6px;min-height:16px"></div>
+    <details id="srvBox" style="margin-top:6px">
+      <summary style="font-size:12px;color:var(--mut);cursor:pointer">서버 주소 (QR로 들어오면 자동 · 보통 안 건드림)</summary>
+      <input id="serverUrl" placeholder="서버 주소" autocomplete="off"
+        style="width:100%;padding:10px;border-radius:10px;border:0;background:#0b1018;color:var(--ink);font-size:13px;margin-top:8px">
+    </details>
     <div class="small" id="srvState" style="text-align:left;margin-top:8px"></div>
   </div>
 
@@ -112,8 +119,20 @@ const $=id=>document.getElementById(id);
 const cam=$('cam'), waveC=$('wave'), wctx=waveC.getContext('2d');
 const ring=$('ring'), tapZone=$('tapZone');
 
+// ── ID 형식 검사: 영문 2~4자 + 숫자 4자리 (예: KCS1234) ──
+function validId(v){ return /^[A-Za-z]{2,4}[0-9]{4}$/.test((v||'').trim()); }
+
 // ── 시작 ──
 async function start(){
+  const id=($('userId').value||'').trim().toUpperCase();
+  $('userId').value=id;
+  if(!validId(id)){
+    $('idHint').innerHTML='<span style="color:var(--red)">이니셜(영문 2~4자)+숫자 4자리로 입력하세요. 예: KCS1234</span>';
+    $('userId').focus(); return;
+  }
+  if(!confirm('ID: '+id+'\n이 ID로 측정·저장할까요?')) return;
+  try{ localStorage.setItem('ppg_uid', id); }catch(e){}
+  $('idHint').textContent='';
   $('startBtn').disabled=true; $('resultCard').style.display='none'; $('gameArea').style.display='flex';
   setStatus('카메라 켜는 중…','wait');
   try{
