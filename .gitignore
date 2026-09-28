@@ -1,0 +1,11 @@
+.vercel
+service_account.json
+server_sheet.log
+server_sheet.err.log
+maus_repo/
+__pycache__/
+measurements.csv
+waveforms/
+pillymon_all.zip
+*.pkl
+!ppg_stress_base_maus.pkl
