@@ -125,7 +125,6 @@
     </div>
     <div class="verdict" id="verdict">–</div>
     <div class="small" id="quality"></div>
-    <button id="retryBtn" style="margin-top:12px;background:var(--green)">🔄 다시 측정</button>
   </div>
 
   <button id="startBtn">측정 시작</button>
@@ -285,7 +284,7 @@ async function finish(){
     const j=await r.json();
     if(j.status==='ok'){
       const score=(j.score!=null?` (${j.score}점)`:'');
-      showResult(localHR,true,null,`저장 완료 ✅${score}`, j.grade||'—');
+      showResult(localHR,true,null,`저장 완료 ✅`, j.grade||'—');
     }else if(j.status==='low_quality'||j.status==='insufficient_beats'){
       showResult(localHR,false,'신호 품질 부족(서버) — 다시');
     }else{
@@ -391,7 +390,6 @@ function beginMeasure(){
   attemptCount=1; start();
 }
 $('startBtn').addEventListener('click', beginMeasure);
-$('retryBtn').addEventListener('click', ()=>{ attemptCount++; start(); });
 </script>
 </body>
 </html>
