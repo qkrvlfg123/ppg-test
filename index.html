@@ -142,7 +142,7 @@ const FS = 30;
 const BREATH = 4.0;      // 들숨/날숨 각 4초 (호흡 유도 리듬)
 let stream, track, rafId, running=false, phase='idle', t0=0, warmT0=0;
 let torchAvail=false, torchOn=false, weakCount=0;
-let selfOX=null, selfLevel=null, attemptCount=0;  // 자가보고 O/X·1~5, 재측정 횟수
+let selfOX=null, selfLevel=null, attemptCount=0;  // 자가보고 O/X·1~5, 재측정 횟수(페이지 열 때마다 0 → 첫 측정 1)
 let samples=[], times=[];
 let score=0, lastTapBeat=-1;
 
@@ -256,6 +256,7 @@ function drawWave(contact){
 // ── 종료·분석: 원파형을 서버로 보내 정확 계산 ──
 async function finish(){
   running=false; cancelAnimationFrame(rafId);
+  attemptCount++;                                        // 측정 끝날 때마다 +1 (첫 측정 1, 재측정 2, 3…)
   try{ track.applyConstraints({advanced:[{torch:false}]}); }catch(e){}
   if(stream) stream.getTracks().forEach(t=>t.stop());
   torchOn=false; phase='idle';
@@ -387,7 +388,7 @@ function beginMeasure(){
   if(!validId(($('userId').value||'').trim())){
     $('idHint').innerHTML='<span style="color:var(--red)">이니셜+숫자4자리로 입력하세요. 예: HY7367</span>'; return;
   }
-  attemptCount=1; start();
+  start();
 }
 $('startBtn').addEventListener('click', beginMeasure);
 </script>
