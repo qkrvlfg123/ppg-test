@@ -54,7 +54,7 @@
 <body>
 <div class="wrap">
   <h1>손가락 PPG 측정</h1>
-  <div class="sub">플래시 옆 카메라를 손가락으로 살짝 덮고 · 30초 · 움직이지 마세요</div>
+  <div class="sub">플래시 옆 카메라를 손가락으로 살짝 덮고 · 1분 · 움직이지 마세요</div>
 
   <div class="card">
     <div class="status"><span id="dot" class="dot"></span><span id="statusText">시작을 누르면 카메라가 켜집니다</span></div>
@@ -98,20 +98,49 @@
     <button id="retryBtn" style="margin-top:12px;background:var(--green)">🔄 다시 측정</button>
   </div>
 
+  <!-- 자가보고 (측정 전) -->
+  <div class="card" id="selfReport" style="display:none;padding:20px;text-align:center">
+    <div id="srStep1">
+      <div style="font-size:17px;font-weight:700;margin-bottom:14px">방금 스트레스를 받았나요?</div>
+      <div style="display:flex;gap:12px;justify-content:center">
+        <button class="srBtn" data-ox="1" style="flex:1;padding:18px;font-size:18px;background:var(--red)">네, 받았어요</button>
+        <button class="srBtn" data-ox="0" style="flex:1;padding:18px;font-size:18px;background:var(--green)">아니요, 괜찮아요</button>
+      </div>
+    </div>
+    <div id="srStep2" style="display:none">
+      <div style="font-size:17px;font-weight:700;margin-bottom:6px">스트레스 정도는 어느 정도였나요?</div>
+      <div class="small" style="margin-bottom:14px">1(전혀) ~ 5(매우)</div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button class="srLevel" data-lv="1" style="flex:1;padding:16px;font-size:18px">1</button>
+        <button class="srLevel" data-lv="2" style="flex:1;padding:16px;font-size:18px">2</button>
+        <button class="srLevel" data-lv="3" style="flex:1;padding:16px;font-size:18px">3</button>
+        <button class="srLevel" data-lv="4" style="flex:1;padding:16px;font-size:18px">4</button>
+        <button class="srLevel" data-lv="5" style="flex:1;padding:16px;font-size:18px">5</button>
+      </div>
+      <div class="small" style="margin-top:10px;color:var(--mut)">1: 전혀 · 2: 조금 · 3: 보통 · 4: 상당히 · 5: 매우</div>
+    </div>
+    <div id="srStep3" style="display:none">
+      <div style="font-size:17px;font-weight:700;margin-bottom:14px">그럼 몸도 실제로 그런지 확인해볼까요?<br>손가락으로 1분만 측정해요</div>
+      <button id="srToMeasure" style="width:100%;padding:18px;font-size:18px">측정 시작</button>
+    </div>
+  </div>
+
   <button id="startBtn">측정 시작</button>
-  <div class="small">측정 30초 · 플래시가 자동으로 켜졌다가 끝나면 꺼집니다. 손가락은 움직이지 마세요.<br>서버 주소를 넣으면 측정이 서버에 저장되고 정확한 판정을 받습니다.</div>
+  <div class="small">측정 1분 · 플래시가 자동으로 켜졌다가 끝나면 꺼집니다. 손가락은 움직이지 마세요.<br>서버 주소를 넣으면 측정이 서버에 저장되고 정확한 판정을 받습니다.</div>
 </div>
 
 <video id="cam" playsinline muted></video>
 
 <script>
 // ── 설정 ──
-const WARMUP = 3;        // 안정화(초)
-const DURATION = 30;     // 측정(초)
+const WARMUP = 3;        // 안정화(초) — 아래 DURATION에 포함(총 60초)
+const DURATION = 60;     // 총 측정(초) = 안정화 3 + 실측정 57. 사용자에겐 "1분"
+const MEASURE = DURATION - WARMUP;  // 실제 HRV 계산 구간(초)
 const FS = 30;
 const BREATH = 4.0;      // 들숨/날숨 각 4초 (호흡 유도 리듬)
 let stream, track, rafId, running=false, phase='idle', t0=0, warmT0=0;
 let torchAvail=false, torchOn=false, weakCount=0;
+let selfOX=null, selfLevel=null, attemptCount=0;  // 자가보고 O/X·1~5, 재측정 횟수
 let samples=[], times=[];
 let score=0, lastTapBeat=-1;
 
@@ -171,7 +200,7 @@ function loop(){
     $('dot').className='dot '+(s.contact?'ok':'wait');
     if(s.contact){
       setStatus('좋아요 — 그대로 유지','ok');
-      if(w>=WARMUP){ phase='measure'; t0=performance.now(); $('breathText').textContent='원이 작아질 때 톡!'; }
+      if(w>=WARMUP){ phase='measure'; t0=performance.now(); $('breathText').textContent='🫁 천천히 들이쉬세요'; }
     }else{
       setStatus('손가락으로 카메라를 덮어주세요','wait'); warmT0=performance.now(); // 접촉 끊기면 안정화 리셋
     }
@@ -189,32 +218,18 @@ function loop(){
   rafId=requestAnimationFrame(loop);
 }
 
-// ── 숨쉬는 원(호흡 리듬) ──
+// ── 호흡 안내 (들이쉬세요/내쉬세요 텍스트) ──
 function breathe(now){
-  const p=(now % (BREATH*2))/(BREATH*2);        // 0~1
-  const scale = p<0.5 ? (p/0.5) : (1-(p-0.5)/0.5); // 0→1→0 (커졌다 작아짐)
-  const px = 70 + scale*150;                     // 70~220px
-  ring.style.transform=`scale(${px/70})`;
-  const txt = p<0.5 ? '들이쉬며 준비…' : '작아질 때 톡!';
+  const p=(now % (BREATH*2))/(BREATH*2);          // 0~1 (한 호흡 주기)
+  // 앞 절반=들숨, 뒤 절반=날숨. 원은 부드럽게 커졌다 작아짐(보조)
+  const scale = p<0.5 ? (p/0.5) : (1-(p-0.5)/0.5);
+  const px = 90 + scale*120; ring.style.transform=`scale(${px/70})`;
+  ring.style.opacity = 0.35;                       // 은은하게(보조 역할)
+  const txt = p<0.5 ? '🫁  천천히 들이쉬세요' : '😮‍💨  천천히 내쉬세요';
   if(phase==='measure') $('breathText').textContent=txt;
-  ring._smallNow = (p>0.92 || p<0.08);           // 가장 작을 때 근처
-  ring._beat = Math.floor(now/(BREATH*2));       // 몇 번째 호흡
 }
 
-// ── 탭(리듬 게임) ──
-tapZone.addEventListener('pointerdown', e=>{
-  if(phase!=='measure') return;
-  e.preventDefault();
-  const good = ring._smallNow;
-  if(good && ring._beat!==lastTapBeat){
-    score+=10; lastTapBeat=ring._beat; flash('GOOD! +10','var(--green)');
-  }else if(good){
-    flash('이미 눌렀어요','var(--mut)');
-  }else{
-    flash('작아질 때!','var(--amber)');
-  }
-  $('score').innerHTML = `점수 <b>${score}</b>`;
-},{passive:false});
+// ── (탭 게임 제거) 측정 중엔 호흡 안내만. 화면 터치는 무시 ──
 
 function flash(msg,color){ const f=$('flash'); f.textContent=msg; f.style.color=color; f.classList.add('show'); clearTimeout(f._t); f._t=setTimeout(()=>f.classList.remove('show'),450); }
 
@@ -257,7 +272,8 @@ async function finish(){
   setStatus('서버로 전송 중…','wait');
   try{
     const r=await fetch(url+'/measure',{ method:'POST', headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},
-      body:JSON.stringify({ user_id:($('userId').value||'anon').trim(), fps:FS, trigger:'manual', waveform:waveRaw }) });
+      body:JSON.stringify({ user_id:($('userId').value||'anon').trim(), fps:FS, trigger:'manual',
+        self_ox:selfOX, self_level:selfLevel, attempt:attemptCount, waveform:waveRaw }) });
     const j=await r.json();
     if(j.status==='ok'){
       const score=(j.score!=null?` (${j.score}점)`:'');
@@ -345,12 +361,40 @@ try{
 function saveCfg(){ try{ localStorage.setItem('ppg_srv',$('serverUrl').value.trim()); localStorage.setItem('ppg_uid',$('userId').value.trim()); }catch(e){} }
 $('serverUrl').addEventListener('change', saveCfg); $('userId').addEventListener('change', saveCfg);
 // 서버 연결 확인 표시
-async function pingServer(){ const u=($('serverUrl').value||'').trim().replace(/\/$/,''); const el=$('srvState'); if(!u){ el.textContent=''; return; } el.textContent='서버 확인 중…'; try{ const r=await fetch(u+'/health',{headers:{'ngrok-skip-browser-warning':'1'}}); const j=await r.json(); el.innerHTML='<span style="color:var(--green)">● 서버 연결됨</span> · 모델 '+(j.model_loaded?'로드':'없음')+(j.n_measurements!=null?' · 누적 '+j.n_measurements+'건':''); }catch(e){ el.innerHTML='<span style="color:var(--red)">● 서버에 못 닿음</span> — 주소/같은 와이파이 확인'; } }
+async function pingServer(){ const u=($('serverUrl').value||'').trim().replace(/\/$/,''); const el=$('srvState'); if(!u){ el.textContent=''; return; } el.textContent='서버 확인 중…'; try{ const r=await fetch(u+'/health',{headers:{'ngrok-skip-browser-warning':'1'}}); const j=await r.json(); el.innerHTML='<span style="color:var(--green)">● 서버 연결됨</span> · 모델 '+(j.model_loaded?'로드':'없음')+' · 누적 '+j.n_measurements+'건'; }catch(e){ el.innerHTML='<span style="color:var(--red)">● 서버에 못 닿음</span> — 주소/같은 와이파이 확인'; } }
 $('serverUrl').addEventListener('change', pingServer);
 window.addEventListener('load', ()=>{ if($('serverUrl').value) pingServer(); });
 
-$('startBtn').addEventListener('click', start);
-$('retryBtn').addEventListener('click', start);
+// ── 자가보고 흐름: [측정 시작] → O/X → 1~5 → 확인 → 실제 측정 ──
+function showSelfReport(){
+  // ID 유효할 때만
+  if(!validId(($('userId').value||'').trim())){
+    $('idHint').innerHTML='<span style="color:var(--red)">이니셜+숫자4자리로 입력하세요. 예: HY6209</span>'; return;
+  }
+  selfOX=null; selfLevel=null;
+  $('selfReport').style.display='block';
+  $('srStep1').style.display='block'; $('srStep2').style.display='none'; $('srStep3').style.display='none';
+  $('startBtn').style.display='none'; $('resultCard').style.display='none';
+  $('selfReport').scrollIntoView({behavior:'smooth'});
+}
+// 1단계: O/X (뒤로가기 없음 — 고르면 바로 2단계)
+document.querySelectorAll('.srBtn').forEach(b=>b.addEventListener('click',()=>{
+  selfOX=parseInt(b.dataset.ox);
+  $('srStep1').style.display='none'; $('srStep2').style.display='block';
+}));
+// 2단계: 1~5 (뒤로가기 없음 — 고르면 바로 3단계)
+document.querySelectorAll('.srLevel').forEach(b=>b.addEventListener('click',()=>{
+  selfLevel=parseInt(b.dataset.lv);
+  $('srStep2').style.display='none'; $('srStep3').style.display='block';
+}));
+// 3단계: 측정 시작 (뭐든 여기로 넘어와 측정)
+$('srToMeasure').addEventListener('click',()=>{
+  $('selfReport').style.display='none'; attemptCount=1; start();
+});
+// 최초 [측정 시작] → 자가보고부터
+$('startBtn').addEventListener('click', showSelfReport);
+// [다시 측정] → 자가보고 없이 바로 재측정, 카운트 증가
+$('retryBtn').addEventListener('click', ()=>{ attemptCount++; start(); });
 </script>
 </body>
 </html>
