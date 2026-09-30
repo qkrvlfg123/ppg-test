@@ -185,6 +185,7 @@ async function start(){
     loop();
   }catch(err){
     setStatus('카메라 권한이 필요해요','bad'); $('breathText').textContent='브라우저에서 카메라를 허용해주세요'; $('startBtn').disabled=false;
+    $('startBtn').style.display='block'; $('cfgCard').style.display='block'; $('guideCard').style.display='block';
   }
 }
 
@@ -360,12 +361,13 @@ function cleanRR(rr){ const f=rr.filter(x=>x>=300&&x<=1500); if(f.length<3) retu
 // QR 주소의 파라미터(?server=...&user=...) 우선, 없으면 저장값
 const DEFAULT_SERVER='https://pillymon-ppg-server.onrender.com';
 $('serverUrl').value = DEFAULT_SERVER;
+// 서버는 Render 주소만 허용 (QR·저장값에 다른 주소가 오면 무시하고 기본 서버)
+const okServer = u => (u||'').trim().replace(/\/+$/,'') === DEFAULT_SERVER;
 try{
   const q=new URLSearchParams(location.search);
-  const qs=q.get('server'), qu=q.get('user');
-  // 예전에 저장된 ngrok 임시 주소는 무시하고 기본 서버로
-  let saved=localStorage.getItem('ppg_srv')||'';
-  if(/ngrok/i.test(saved)) saved='';
+  const qs=okServer(q.get('server')) ? DEFAULT_SERVER : '', qu=q.get('user');
+  // 예전에 저장된 ngrok 임시 주소 등 허용 안 된 주소는 무시하고 기본 서버로
+  const saved=okServer(localStorage.getItem('ppg_srv')) ? DEFAULT_SERVER : '';
   $('serverUrl').value = qs || saved || DEFAULT_SERVER;
   $('userId').value    = qu || localStorage.getItem('ppg_uid') || '';
   if(qs||qu){ localStorage.setItem('ppg_srv',$('serverUrl').value.trim()); localStorage.setItem('ppg_uid',$('userId').value.trim()); }
