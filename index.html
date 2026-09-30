@@ -165,7 +165,11 @@ async function start(){
   if(!confirm('ID: '+id+'\n이 ID로 측정·저장할까요?')) return;
   try{ localStorage.setItem('ppg_uid', id); }catch(e){}
   $('idHint').textContent='';
-  $('startBtn').disabled=true; $('resultCard').style.display='none'; $('gameArea').style.display='flex'; $('waveCard').style.display='block';
+  $('startBtn').disabled=true; $('resultCard').style.display='none';
+  $('gameArea').style.display='flex'; $('waveCard').style.display='block';
+  $('guideCard').style.display='none';                 // 측정 중엔 가이드 숨김
+  $('cfgCard').style.display='none';                   // ID 입력칸도 숨김
+  $('startBtn').style.display='none';
   setStatus('카메라 켜는 중…','wait');
   try{
     stream=await navigator.mediaDevices.getUserMedia({
@@ -335,6 +339,11 @@ function showResult(hr, ok, failMsg, note, gradeText){
     $('quality').textContent = note||'';
   }
   $('gameArea').style.display='none';
+  $('waveCard').style.display='none';                  // 측정 끝나면 파형칸 숨김
+  $('cfgCard').style.display='block';                   // ID 입력칸 복원
+  $('guideCard').style.display='block';                 // 가이드 복원(접힘 상태로)
+  $('guideCard').open=false;                            // 결과 볼 땐 가이드 접어둠
+  $('startBtn').style.display='block';
   $('startBtn').disabled=false; $('startBtn').textContent='다시 측정';
 }
 
